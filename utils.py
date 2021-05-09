@@ -1,4 +1,4 @@
-def get_blosum62(pair):
+def get_blosum62(q,t):
     blosum62 = {
         'WF': 1, 'LR': -2, 'SP': -1, 'VT': 0,
         'QQ': 5, 'NA': -2, 'ZY': -2, 'WR': -3,
@@ -71,5 +71,9 @@ def get_blosum62(pair):
         'BF': -3, 'FL': 0, 'XQ': -1, 'BB': 4
     }
 
-    return blosum62[pair]
+    try:
+        score = blosum62[q + t]
+    except:
+        score = blosum62[t + q]
 
+    return score
