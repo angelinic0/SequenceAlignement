@@ -9,13 +9,7 @@ from Bio import SeqIO
 from numba import jit
 
 
-def hashnchain(seq, k, type):
-    ''' hash the k-mers and chain the next instance
-
-    :param seq: nucleotide or amino acid sequence
-    :param k: k-mer size
-    :return: Returns the hashed and chain lookup table
-    '''
+def hash(seq, k, type):
     if type == 'nucleotide':
         val_dict = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         num_vals = 4
@@ -33,7 +27,6 @@ def hashnchain(seq, k, type):
 
     tuples = len(seq) - k + 1
     a = np.full(num_vals ** k, np.nan, dtype=object)
-    b = np.full(num_vals ** k, np.nan, dtype=object)
     for i in range(tuples):
         c = 0
         s = ''
@@ -42,13 +35,12 @@ def hashnchain(seq, k, type):
             s += seq[i + j]
         if np.isnan(a[c]).any():
             a[c] = [i]
-            b[c] = s
         else:
             a[c].append(i)
-    return a, b
+    return a
 
 
-def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops):
+def FASTA(q_seq, t_seq, type, k, diag_run_thres, diag_allowed_gap, diag_gap_pen, num_top_diags, chain_gap_pen):
     # Flip query and target based on length
     if len(q_seq) > len(t_seq):
         temp = q_seq
@@ -57,8 +49,8 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
         print('Query/Target swap')
 
     # Create hash and chain for sequences
-    q_hash_list, q_hash_value = hashnchain(q_seq, k, type)
-    t_hash_list, t_hash_value = hashnchain(t_seq, k, type)
+    q_hash_list = hash(q_seq, k, type)
+    t_hash_list = hash(t_seq, k, type)
     num_diags = len(q_seq) + len(t_seq) - (2 * k) + 1
 
     diags = []
@@ -82,7 +74,7 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
             diag_qchars.append(np.zeros((len(q_seq)), dtype=int))
             diag_tchars.append(np.zeros((len(q_seq)), dtype=int))
 
-    # Determine Hash&Chain Matches
+    # Determine Hash Matches
     for i, qk in enumerate(q_hash_list):
         if not np.isnan(qk).any() and not np.isnan(t_hash_list[i]).any():
             for i_qk in qk:
@@ -103,12 +95,16 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
 
     # Find all hotspots above certain threshold, retain important information
     diags_hotspots = []
+    diags_qhotspots = []
+    diags_thotspots = []
     diags_gaps = []
     diags_scores = []
     diags_hotspot_qseqs = []
     diags_hotspot_tseqs = []
     for i, diag in enumerate(diags):
         hotspot = []
+        qhotspot = []
+        thotspot = []
         start = np.nan
         end = np.nan
         h_gap = 0
@@ -125,14 +121,16 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
                     else:
                         end = j
                 else:
-                    if not np.isnan(start) and allowed_gap != 0 and diag[j:j+(allowed_gap+1)].sum() > 0:
+                    if not np.isnan(start) and diag_allowed_gap != 0 and diag[j:j+(diag_allowed_gap+1)].sum() > 0:
                         end = j
-                        h_gap += 1#len(np.nonzero(diag[j:j+(allowed_gap+1)]))
+                        h_gap += 1#len(np.nonzero(diag[j:j+(diag_allowed_gap+1)]))
                     elif not np.isnan(start) and not np.isnan(end):
-                        if (end - start + 1) - (h_gap * gap_pen) > hot_spot_thres:
+                        if (end - start + 1) - (h_gap * diag_gap_pen) > diag_run_thres:
                             hotspot.append([start, end])
+                            qhotspot.append([diag_qchars[i][start], diag_qchars[i][end]])
+                            thotspot.append([diag_tchars[i][start], diag_tchars[i][end]])
                             gap.append(h_gap)
-                            score.append((end - start + 1) - (h_gap * gap_pen))
+                            score.append((end - start + 1) - (h_gap * diag_gap_pen))
                             hotspot_qseq.append(q_seq[diag_qchars[i][start]:diag_qchars[i][end]+1])
                             hotspot_tseq.append(t_seq[diag_tchars[i][start]:diag_tchars[i][end]+1])
                         start = np.nan
@@ -142,15 +140,21 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
                         continue
 
             if not np.isnan(start) and not np.isnan(end):
-                if (end - start + 1) - (h_gap * gap_pen) > hot_spot_thres:
+                if (end - start + 1) - (h_gap * diag_gap_pen) > diag_run_thres:
                     hotspot.append([start, end])
+                    qhotspot.append([diag_qchars[i][start], diag_qchars[i][end]])
+                    thotspot.append([diag_tchars[i][start], diag_tchars[i][end]])
                     gap.append(h_gap)
-                    score.append((end - start + 1) - (h_gap * gap_pen))
+                    score.append((end - start + 1) - (h_gap * diag_gap_pen))
                     hotspot_qseq.append(q_seq[diag_qchars[i][start]:diag_qchars[i][end] + 1])
                     hotspot_tseq.append(t_seq[diag_tchars[i][start]:diag_tchars[i][end] + 1])
 
         # Start stop
         diags_hotspots.append(hotspot)
+        # Start and Stop idx on Query
+        diags_qhotspots.append(qhotspot)
+        # Start and Stop Idx on Target
+        diags_thotspots.append(thotspot)
         # Gaps
         diags_gaps.append(gap)
         # Simple score
@@ -190,38 +194,90 @@ def FASTA(q_seq, t_seq, type, k, hot_spot_thres, allowed_gap, gap_pen, num_tops)
     sort_top_scores_idx = []
     sort_top_scores = []
     for idx in top_idx:
-        sort_top_scores_idx.append(top_scores_idx[idx])
-        sort_top_scores.append(top_scores[idx])
+        if top_scores[idx] > 0:
+            sort_top_scores_idx.append(top_scores_idx[idx])
+            sort_top_scores.append(top_scores[idx])
 
-    top_ten_idx = sort_top_scores_idx[:10]
+    top_N_idx = sort_top_scores_idx[:num_top_diags]
 
     # Init One
-    init_one_idx = top_ten_idx[0]
+    init_one_idx = top_N_idx[0]
 
-    init_one_diag = init_one_idx[0]
-    init_one_start = diags_hotspots[init_one_idx[0]][init_one_idx[1]][0]
-    init_one_end = diags_hotspots[init_one_idx[0]][init_one_idx[1]][1]
+    chain = [init_one_idx]
+    chain_gap = []
+    for i, idx in enumerate(top_N_idx[1:]):
 
-    for i, idx in enumerate(top_ten_idx[1:]):
-        start = diags_hotspots[idx[0]][idx[1]][0]
-        end = diags_hotspots[idx[0]][idx[1]][1]
+        q_start = diags_qhotspots[idx[0]][idx[1]][0]
+        t_start = diags_thotspots[idx[0]][idx[1]][0]
+
+        q_end = diags_qhotspots[idx[0]][idx[1]][1]
+        t_end = diags_thotspots[idx[0]][idx[1]][1]
+
+        q_chain_start = diags_qhotspots[chain[0][0]][chain[0][1]][0]
+        t_chain_start = diags_thotspots[chain[0][0]][chain[0][1]][0]
+
+        q_chain_end = diags_qhotspots[chain[-1][0]][chain[-1][1]][1]
+        t_chain_end = diags_thotspots[chain[-1][0]][chain[-1][1]][1]
+
+        # If end diag run is up and left of the start of the chain
+        if q_end <= q_chain_start and t_end <= t_chain_start:
+            chain.insert(0,idx)
+            x_gap = t_chain_start - t_end
+            y_gap = q_chain_start - q_end
+            chain_gap.insert(0, max(x_gap, y_gap))
+        # If start diag is down and right of the end of the chain
+        elif q_start >= q_chain_end and t_start >= t_chain_end:
+            chain.append(idx)
+            x_gap = t_start - t_chain_end
+            y_gap = q_start - q_chain_end
+            chain_gap.append(max(x_gap, y_gap))
+        else:
+            for j, i_chain in enumerate(chain[1:]):
+                q_left_chain_end = diags_qhotspots[chain[j][0]][chain[j][1]][1]
+                t_left_chain_end = diags_thotspots[chain[j][0]][chain[j][1]][1]
+
+                q_right_chain_start = diags_qhotspots[chain[j+1][0]][chain[j+1][1]][0]
+                t_right_chain_start = diags_thotspots[chain[j+1][0]][chain[j+1][1]][0]
+
+                if (q_start >= q_left_chain_end and t_start >= t_left_chain_end) and\
+                     (q_end <= q_right_chain_start and t_end <= t_right_chain_start):
+                    chain.insert(j,idx)
+
+                    left_x_gap = t_start - t_left_chain_end
+                    left_y_gap = q_start - q_left_chain_end
+
+                    right_x_gap = t_right_chain_start - t_end
+                    right_y_gap = q_right_chain_start - q_end
+
+                    chain_gap[j-1] = max(right_x_gap, right_y_gap)
+                    chain_gap.insert(j-1, max(left_x_gap, left_y_gap))
+
+    initn = 0
+    for diag, idx in chain:
+        initn += diags_scores[diag][idx]
+
+    gaps = len(chain)-1
+    total_gap_pen = gaps*chain_gap_pen
+
+    initn -= total_gap_pen
+
+    return initn
 
 
-        if
-
-
-    print('End')
-
-
-def database_search(query, database_list, type='nucleotide', k=3, hot_spot_thres=50, allowed_gap=10, gap_pen=1, num_tops=10):
-    Entrez.email = 'chris.f.angelini@gmail.com'
+def database_search(query, database_list, type='nucleotide', k_length=6, diag_run_thres=50, diag_allowed_gap=10, diag_gap_pen=5, num_top_diags=10, chain_gap_pen=20):
     handle = Entrez.efetch(db=type, id=query, rettype="gb", retmode="text")
     q_record = SeqIO.read(handle, "genbank")
     handle.close()
     print(f'{q_record.id} \n {q_record.description}')
     query_seq = str(q_record.seq)
 
-    initn = []
+    l = float(0.318)
+    k = float(0.13)
+    d = float(100)
+
+    initns = []
+    Es = []
+    #opts = []
     for target in database_list:
         handle = Entrez.efetch(db=type, id=target, rettype="gb", retmode="text")
         record = SeqIO.read(handle, "genbank")
@@ -233,26 +289,63 @@ def database_search(query, database_list, type='nucleotide', k=3, hot_spot_thres
         target_seq = str(record.seq)
 
         clock0 = time.time()
-        FASTA(query_seq, target_seq, type=type, k=k, hot_spot_thres=hot_spot_thres, allowed_gap=allowed_gap, gap_pen=gap_pen, num_tops=num_tops)
+        t_initn = FASTA(query_seq, target_seq, type=type, k=k_length, diag_run_thres=diag_run_thres, diag_allowed_gap=diag_allowed_gap, diag_gap_pen=diag_gap_pen, num_top_diags=num_top_diags, chain_gap_pen=chain_gap_pen)
+
+        initns.append(t_initn)
+        #opts.append(t_opt)
+
+        m = len(query_seq)
+        n = len(target_seq)
+        E = float(1 - np.exp(-(1 - np.exp(-k * m * n * np.exp(-l * t_initn))) * d))
+        Es.append(E)
         clock1 = time.time()
         print(f' {(clock1 - clock0) * 1000: 2.4f} ms')
-    return initn
+
+    top_initn_idx = list(np.argsort(initns))
+    top_initn_idx.reverse()
+    top_initns = []
+    top_seqs = []
+    top_Es = []
+    for idx in top_initn_idx:
+        top_initns.append(initns[idx])
+        top_seqs.append(database_list[idx])
+        top_Es.append(Es[idx])
+
+    top_initn = top_initns[0]
+    top_seq = top_seqs[0]
+    top_E = top_Es[0]
+
+
+    return top_initn, top_seq, top_E, top_initns, top_seqs, top_Es
 
 if __name__ == '__main__':
+    Entrez.email = 'chris.f.angelini@gmail.com'
+    #query_acc = "AY707088"
+    #database_accs = ["X79493"]
+    #type = 'nucleotide'
 
-    query_acc = "AY707088"
-    database_accs = ["X79493"]
-    type = 'nucleotide'
+    query_acc = 'AAU12168.1'
+    database_accs = ['P26367.2','Q1LZF1.1','P63016.1','P47238.1','P55864.1','P26630.1','O73917.1','P47237.1','G5EDS1.1','Q0IH87.2','P47239.2','P23760.2','P24610.2','O43316.1','P09082.1','O88436.1',
+    'P32115.2','Q645N4.1','P06601.1','P23759.4','O18381.3','Q90268.2','O57685.2','O57682.2','Q02962.4','P32114.2','Q02650.1','Q02548.1','Q00288.3','P09083.2','Q9YH95.1','P51974.2',
+    'Q06710.2','P47240.1','Q9PUK5.1','A0JMA6.2','Q5R9M8.1','Q28DP6.2','P47236.1','Q2VL57.1','Q2VL59.1','Q2VL61.1','Q2VL60.1','Q2VL58.1','Q2VL62.1','P55771.3','P23757.3','Q2L4T2.1','Q2VL51.1',
+    'P47242.1','Q2VL54.1','Q2VL50.1','P55166.1','Q2VL56.1','P09084.4','P15863.4','P23758.3','Q9PVX0.1','Q9PVY0.1','O42358.1','O42356.2','O42201.2','Q06453.2','O42567.2','Q9I9A2.1','Q9I9D5.1',
+    'O35602.2','O42357.1','Q9JLT7.1','O42115.1','Q9W2Q1.2','Q96IS3.1','A2T711.1','Q96QS3.1','A6YP92.1','Q9Y2V3.2','A6NNA5.1','Q8BYH0.2','Q7YRX0.1','O35085.3','Q91V10.1','Q9IAL2.1','O97039.1',
+    'Q62798.1','Q9GMA3.1','Q9NZR4.2','Q90277.1','Q4LAL6.1','Q94398.3','O42250.2','Q9H161.2','O35137.1','Q0P031.1','Q26657.2','O95076.2','O70137.1','Q1LVQ7.1','F1NEA7.2']
+    type = 'protein'
 
-    #query_acc = "AAU12168.1"
-    #database_accs = ["O18381"]
-    #type = 'protein'
+    top_initn, top_seq, E, initn_list, seq_list, E_list = database_search(query_acc, database_accs, type=type, k_length=2, diag_run_thres=0, diag_allowed_gap=10, diag_gap_pen=5, num_top_diags=10, chain_gap_pen=20)
+    print(f'Top Accession: {top_seq}')
+    print(f'Top Initn: {top_initn}')
+    print(f'Top E-value: {E}')
 
-    database_search(query_acc, database_accs, type, k=3, hot_spot_thres=20, allowed_gap=10, gap_pen=2, num_tops=10)
-
+    print('\nDatabase')
+    for i, acc in enumerate(seq_list):
+        print(f'Accession: {acc}')
+        print(f'\t\tInitn: {initn_list[i]}')
+        print(f'\t\tE: {E_list[i]}')
     #target = 'ccatcggcatcg'.upper()
     #query = 'gcataggc'.upper()
-    #FASTA(query, target, diag_min_score=3, k=3, allowed_gap=1, gap_pen=1)
+    #FASTA(query, target, diag_min_score=3, k=3, diag_allowed_gap=1, diag_gap_pen=1)
     #clock1 = time.time()
 
 
