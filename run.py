@@ -1,5 +1,8 @@
 import os
 import time
+
+import pylab as pl
+
 from utils import get_blosum62
 import numpy as np
 from itertools import product
@@ -202,6 +205,7 @@ def FASTA(q_seq, t_seq, type, k, diag_run_thres, diag_allowed_gap, diag_gap_pen,
             sort_top_scores.append(top_scores[idx])
 
     top_N_idx = sort_top_scores_idx[:num_top_diags]
+    top_N_scores = sort_top_scores[:num_top_diags]
 
     colors = ['blue', 'purple', 'red', 'peru', 'orange', 'gold', 'yellow', 'lime', 'dodgerblue', 'cyan']
     if plot:
@@ -214,6 +218,11 @@ def FASTA(q_seq, t_seq, type, k, diag_run_thres, diag_allowed_gap, diag_gap_pen,
 
             plot[0].plot([t_start, t_end], [q_start, q_end], label=f'HSR{i + 1}', color=colors[i])
             plot[1].plot([t_start, t_end], [q_start, q_end], color=colors[i])
+            plot[1].annotate(f'S: {top_N_scores[i]}',  # this is the text
+                         (t_end,q_end),  # this is the point to label
+                         textcoords="offset points",  # how to position the text
+                         xytext=(-10, 0),  # distance from text to points (x,y)
+                         ha='center', fontsize=3, color=colors[i])
 
         fig = plot[1].figure
         fig.legend(loc=3, bbox_to_anchor=(0.02, 0.47), fontsize='xx-small', ncol=10)
@@ -221,63 +230,82 @@ def FASTA(q_seq, t_seq, type, k, diag_run_thres, diag_allowed_gap, diag_gap_pen,
     init_one_idx = top_N_idx[0]
 
     chain = [init_one_idx]
+    chain_color = ['blue']
 
     chain_gap = []
     for i, idx in enumerate(top_N_idx[1:]):
+        if top_N_scores[i+1] > chain_gap_pen:
+            q_start = diags_qhotspots[idx[0]][idx[1]][0]
+            t_start = diags_thotspots[idx[0]][idx[1]][0]
 
-        q_start = diags_qhotspots[idx[0]][idx[1]][0]
-        t_start = diags_thotspots[idx[0]][idx[1]][0]
+            q_end = diags_qhotspots[idx[0]][idx[1]][1]
+            t_end = diags_thotspots[idx[0]][idx[1]][1]
 
-        q_end = diags_qhotspots[idx[0]][idx[1]][1]
-        t_end = diags_thotspots[idx[0]][idx[1]][1]
+            q_chain_start = diags_qhotspots[chain[0][0]][chain[0][1]][0]
+            t_chain_start = diags_thotspots[chain[0][0]][chain[0][1]][0]
 
-        q_chain_start = diags_qhotspots[chain[0][0]][chain[0][1]][0]
-        t_chain_start = diags_thotspots[chain[0][0]][chain[0][1]][0]
+            q_chain_end = diags_qhotspots[chain[-1][0]][chain[-1][1]][1]
+            t_chain_end = diags_thotspots[chain[-1][0]][chain[-1][1]][1]
 
-        q_chain_end = diags_qhotspots[chain[-1][0]][chain[-1][1]][1]
-        t_chain_end = diags_thotspots[chain[-1][0]][chain[-1][1]][1]
+            # If end diag run is up and left of the start of the chain
+            if q_end <= q_chain_start and t_end <= t_chain_start:
+                chain.insert(0, idx)
+                chain_color.insert(0,colors[i + 1])
+                x_gap = t_chain_start - t_end
+                y_gap = q_chain_start - q_end
+                chain_gap.insert(0, max(x_gap, y_gap))
+            # If start diag is down and right of the end of the chain
+            elif q_start >= q_chain_end and t_start >= t_chain_end:
+                chain.append(idx)
+                chain_color.append(colors[i + 1])
+                x_gap = t_start - t_chain_end
+                y_gap = q_start - q_chain_end
+                chain_gap.append(max(x_gap, y_gap))
+            else:
+                for j, i_chain in enumerate(chain[1:]):
+                    q_left_chain_end = diags_qhotspots[chain[j][0]][chain[j][1]][1]
+                    t_left_chain_end = diags_thotspots[chain[j][0]][chain[j][1]][1]
 
-        if i == 0 and plot:
-            plot[2].plot([t_chain_start, t_chain_end], [q_chain_start, q_chain_end], color=colors[i])
+                    q_right_chain_start = diags_qhotspots[chain[j + 1][0]][chain[j + 1][1]][0]
+                    t_right_chain_start = diags_thotspots[chain[j + 1][0]][chain[j + 1][1]][0]
 
-        # If end diag run is up and left of the start of the chain
-        if q_end <= q_chain_start and t_end <= t_chain_start:
-            chain.insert(0, idx)
-            x_gap = t_chain_start - t_end
-            y_gap = q_chain_start - q_end
-            chain_gap.insert(0, max(x_gap, y_gap))
-            if plot:
-                plot[2].plot([t_start, t_end], [q_start, q_end], color=colors[i + 1])
-        # If start diag is down and right of the end of the chain
-        elif q_start >= q_chain_end and t_start >= t_chain_end:
-            chain.append(idx)
-            x_gap = t_start - t_chain_end
-            y_gap = q_start - q_chain_end
-            chain_gap.append(max(x_gap, y_gap))
-            if plot:
-                plot[2].plot([t_start, t_end], [q_start, q_end], color=colors[i + 1])
-        else:
-            for j, i_chain in enumerate(chain[1:]):
-                q_left_chain_end = diags_qhotspots[chain[j][0]][chain[j][1]][1]
-                t_left_chain_end = diags_thotspots[chain[j][0]][chain[j][1]][1]
+                    if (q_start >= q_left_chain_end and t_start >= t_left_chain_end) and \
+                            (q_end <= q_right_chain_start and t_end <= t_right_chain_start):
 
-                q_right_chain_start = diags_qhotspots[chain[j + 1][0]][chain[j + 1][1]][0]
-                t_right_chain_start = diags_thotspots[chain[j + 1][0]][chain[j + 1][1]][0]
+                        chain.insert(j+1, idx)
+                        chain_color.insert(j+1, colors[i + 1])
 
-                if (q_start >= q_left_chain_end and t_start >= t_left_chain_end) and \
-                        (q_end <= q_right_chain_start and t_end <= t_right_chain_start):
-                    chain.insert(j, idx)
+                        left_x_gap = t_start - t_left_chain_end
+                        left_y_gap = q_start - q_left_chain_end
 
-                    left_x_gap = t_start - t_left_chain_end
-                    left_y_gap = q_start - q_left_chain_end
+                        right_x_gap = t_right_chain_start - t_end
+                        right_y_gap = q_right_chain_start - q_end
 
-                    right_x_gap = t_right_chain_start - t_end
-                    right_y_gap = q_right_chain_start - q_end
+                        chain_gap[j - 1] = max(right_x_gap, right_y_gap)
+                        chain_gap.insert(j - 1, max(left_x_gap, left_y_gap))
 
-                    chain_gap[j - 1] = max(right_x_gap, right_y_gap)
-                    chain_gap.insert(j - 1, max(left_x_gap, left_y_gap))
-                    if plot:
-                        plot[2].plot([t_start, t_end], [q_start, q_end], color=colors[i + 1])
+    if plot:
+        for j in range(1, len(chain)):
+            q_left_chain_end = diags_qhotspots[chain[j-1][0]][chain[j-1][1]][1]
+            t_left_chain_end = diags_thotspots[chain[j-1][0]][chain[j-1][1]][1]
+
+            q_right_chain_start = diags_qhotspots[chain[j][0]][chain[j][1]][0]
+            t_right_chain_start = diags_thotspots[chain[j][0]][chain[j][1]][0]
+            plot[2].plot([t_left_chain_end, t_right_chain_start], [q_left_chain_end, q_right_chain_start], color='gray')
+
+        for i, idx in enumerate(top_N_idx):
+            q_start = diags_qhotspots[idx[0]][idx[1]][0]
+            t_start = diags_thotspots[idx[0]][idx[1]][0]
+
+            q_end = diags_qhotspots[idx[0]][idx[1]][1]
+            t_end = diags_thotspots[idx[0]][idx[1]][1]
+
+            plot[2].plot([t_start, t_end], [q_start, q_end], color=colors[i])
+            plot[2].annotate(f'S: {top_N_scores[i]}',  # this is the text
+                         (t_end,q_end),  # this is the point to label
+                         textcoords="offset points",  # how to position the text
+                         xytext=(-10, 0),  # distance from text to points (x,y)
+                         ha='center', fontsize=3, color=colors[i])
 
     initn = 0
     for diag, idx in chain:
@@ -316,7 +344,7 @@ def database_search(query, database_list, type='nucleotide', k_length=6, diag_ru
         target_seq = str(record.seq)
         axs = []
         if plot:
-            fig = plt.figure()
+            fig2 = plt.figure(2)
             gs = gridspec.GridSpec(2, 2)
             gs.update(wspace=0.05, hspace=0.15)  # set the spacing between axes.
             ax1 = plt.subplot(gs[0, 1])  # row 1, span all columns
@@ -339,7 +367,7 @@ def database_search(query, database_list, type='nucleotide', k_length=6, diag_ru
                 for j, le in enumerate(target_seq):
                     if el == le:
                         mat[i, j] = 1
-
+            plt.figure(fig2)
             ax1.imshow(mat, cmap='binary')
             ax2.imshow(mat, cmap='binary')
             axs = [ax1, ax3, ax4]
@@ -360,15 +388,15 @@ def database_search(query, database_list, type='nucleotide', k_length=6, diag_ru
         print(f' {(clock1 - clock0) * 1000: 2.4f} ms')
 
         if plot:
-            fig.suptitle(f'Initn: {t_initn: 5d}     E-Value: {E: .2E}')
+            fig2.suptitle(f'Initn: {t_initn: 5d}     E-Value: {E: .2E}')
             ax3.set(xlabel=f'{record.id}', ylabel=f'{q_record.id}')
 
-            ax1.set_xticks([])
             ax2.set_xticks([])
-            ax2.set_yticks([])
+            ax1.set_xticks([])
+            ax1.set_yticks([])
             ax4.set_yticks([])
 
-            ax1.tick_params(labelsize=6)
+            ax2.tick_params(labelsize=6)
             ax3.tick_params(labelsize=6)
             ax4.tick_params(labelsize=6)
 
@@ -398,29 +426,6 @@ def database_search(query, database_list, type='nucleotide', k_length=6, diag_ru
 
 if __name__ == '__main__':
     Entrez.email = 'chris.f.angelini@gmail.com'
-    '''
-    query_acc = "AY707088"
-    database_accs = ['NM_001368888.2', 'NM_001368891.2', 'NM_001258465.3', 'NM_000280.5', 'NM_001368887.2',
-                     'NM_001258464.2', 'NM_001368889.2', 'NM_001368890.2', 'NM_001127612.3', 'AY707088.1', 'AY047583.1',
-                     'BC011953.1', 'M93650.1', 'DQ891436.2', 'DQ894612.2', 'AB528383.1', 'M77844.1', 'AK074881.1',
-                     'XM_031015745.1', 'XM_004050882.3','XM_004050881.3', 'XM_004050880.3', 'NM_001368910.2',
-                     'NM_001368906.2', 'NM_001368907.2','NM_001368901.2','NM_001368899.2', 'XM_030829473.1',
-                     'XM_030829472.1', 'XM_030829471.1', 'XM_030829470.1','XM_030829469.1', 'XM_024255981.1',
-                     'XM_024255980.1', 'XM_024255979.1', 'XM_034932347.1', 'XM_024930633.2','XM_003830408.3',
-                     'XM_003830407.3', 'XM_003830406.3', 'XM_032166337.1', 'XM_032166336.1', 'XM_032166335.1',
-                     'XM_032166334.1','XM_032166333.1', 'XM_025355390.1', 'XM_025355389.1', 'XM_025355388.1',
-                     'XM_016920627.2', 'XM_016920625.2','XM_016920626.2', 'XM_016920623.2', 'XM_015434147.1',
-                     'XM_015434146.1', 'XM_015434145.1', 'XM_015434144.1','XM_015434143.1', 'XM_012062138.1',
-                     'XM_012062137.1', 'XM_012062136.1', 'XM_012062135.1', 'XM_011965593.1','XM_011965592.1',
-                     'XM_011965591.1', 'XM_011965590.1', 'XM_011965589.1', 'XM_009186368.3','XM_009186367.3',
-                     'XM_009186366.2', 'XM_021926816.2', 'XM_028832522.1', 'XM_028832521.1', 'XM_028832520.1',
-                     'XM_015114508.2','XM_015114510.2', 'XM_015114509.2', 'XM_011723992.2', 'XM_011723991.2',
-                     'XM_011723990.2', 'XM_024789714.1','XM_011723989.2', 'XM_023230319.1', 'XM_023230318.1',
-                     'XM_023230317.1', 'NM_001266257.1','NM_001284987.1','XM_031015752.1', 'XM_019036878.2',
-                     'XM_010358333.2', 'XM_010358332.2', 'XM_010358334.2','XM_008003301.2','XM_037997505.1',
-                     'XM_008003282.2', 'XM_008003291.2', 'XM_008003272.2', 'XM_030829485.1','XM_030829482.1',
-                     'XM_033205274.1']
-    type = 'nucleotide'''''
 
     query_acc = 'AAU12168.1'
     database_accs = ['P26367.2', 'Q1LZF1.1', 'P63016.1', 'P47238.1', 'P55864.1', 'P26630.1', 'O73917.1', 'P47237.1',
@@ -436,7 +441,7 @@ if __name__ == '__main__':
                      'Q91V10.1', 'Q9IAL2.1', 'O97039.1', 'Q62798.1', 'Q9GMA3.1', 'Q9NZR4.2', 'Q90277.1', 'Q4LAL6.1',
                      'Q94398.3', 'O42250.2', 'Q9H161.2', 'O35137.1', 'Q0P031.1', 'Q26657.2', 'O95076.2', 'O70137.1',
                      'Q1LVQ7.1', 'F1NEA7.2']
-    database_accs = ['Q9I9D5.1']
+    #database_accs = ['Q9I9D5.1']
     type = 'protein'
 
     top_initn, top_seq, E, \
@@ -444,7 +449,7 @@ if __name__ == '__main__':
                                                    k_length=2,
                                                    diag_run_thres=0,
                                                    diag_allowed_gap=30, diag_gap_pen=1,
-                                                   num_top_diags=10, chain_gap_pen=11, plot=False)
+                                                   num_top_diags=10, chain_gap_pen=20, plot=True)
     print(f'Top Accession: {top_seq}')
     print(f'Top Initn: {top_initn}')
     print(f'Top E-value: {E}')
