@@ -45,4 +45,8 @@ python run.py
 ```
 ## Results
 
+The FASTA implementation is tested on a query sequence with a one hundred potential target sequences database for protein sequences. The FASTA implementation is reasonably fast, achieving roughly a 150ms processing time per sequence for a database of 100 protein sequences of 420 residues in length, without parallelization. Searching the whole database takes roughly 8 seconds. 
+ In comparison to BLAST and the FASTA servers, this implementation ranks the protein sequences similarly. The top 10 proteins sequences are ranked the same in each medium. This implementation, however, appears to overestimate the initn value for the target sequences. However, with this true for all sequence scores in the database, the sequence order remains the same. This observed behavior may be a result of differences in thresholding parameters defined by the user in this implementation and statistically determined parameters in the FASTA server implementation
+Compared to the FASTA server, the E-values trended in the same general direction down the list; however, it appears that E-value saturates to one for lower initn values. Though the constants \lambda and k set to 0.055 and 0.281, respectively, provide reasonable results, not generating constants \lambda and k appears to impact to E-values of the less similar scores, quickly trending to one.
+
 <img src="AAU12168.1/gap_allow_30/target_Q9Y2V3.2.png" alt="hi" class="inline"/>
