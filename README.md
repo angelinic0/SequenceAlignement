@@ -21,8 +21,9 @@ Using the implementation to search a database subset
 |-num_top_diags             | 10            | Number of diagonal Runs for Chaining  
 |-chain_gap_pen             | 20            | Chaining gap penalty           
 
-The accession numbers must be changed manually in run.py
 ### Defaults
+The accession numbers must be changed manually in run.py
+
 ```python
     query_acc = 'AAU12168.1'
     database_accs = ['P26367.2', 'Q1LZF1.1', 'P63016.1', 'P47238.1', 'P55864.1', 'P26630.1', 'O73917.1', 'P47237.1',
